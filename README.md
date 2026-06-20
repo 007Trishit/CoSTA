@@ -92,12 +92,13 @@ CoSTA/
 │   └── ...                        # supporting modules
 │
 ├── pretrained/
-│   ├── ccd_color.pth              # ✅ contractive anchor, color (ships with repo)
+│   ├── ccd_color.pth              #  contractive anchor, color 
 │   ├── ccd_color_config.yml
-│   ├── ccd_gray.pth               #  contractive anchor, grayscale (see Drive)
+│   ├── ccd_gray.pth               #  contractive anchor, grayscale 
 │   └── ccd_gray_config.yml
 │
 └── images/
+    ├── CBSD10/                    # test dataset
     ├── leaves.png, im_078.png     # sample test images
     └── kernels/                   # Levin09.mat (deblur), kernels_12.mat (SR)
 ```
@@ -156,7 +157,6 @@ pretrained/
 ├── dncnn_sigma2_color.pth / ...
 ├── GSDRUNet_color_torch.ckpt / ...
 ├── coco_color.pth / SPC_DRUNet_color.pth / ...
-├── deal_color.pth / ...
 └── ...
 ```
 
@@ -183,7 +183,6 @@ To change task/solver/denoiser, edit the call in the demo script:
 ## Roadmap
 
 - **Super-resolution** demos and configs (forward model already supported in `PnP_class.py`).
-- Broader solver / denoiser sweeps reproducing the paper tables.
 - Updated **paper and arXiv links** once available.
 
 ---
