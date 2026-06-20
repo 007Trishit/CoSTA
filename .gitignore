@@ -1,0 +1,24 @@
+# Demo / experiment outputs (regenerated on every run — don't commit)
+demo_logs/
+Experiments/
+
+# Large black-box denoiser weights — host on Google Drive, not git
+pretrained/drunet_color.pth
+pretrained/drunet_gray.pth
+pretrained/*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+build/
+dist/
+
+# Env / editor / OS
+.venv/
+venv/
+.env
+.vscode/
+.idea/
+.DS_Store
