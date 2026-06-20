@@ -17,7 +17,7 @@ Pretrained Gaussian denoisers can solve a wide range of model-based image recons
 - Blend `T` with a lightweight **contractive anchor** `S` via `T_θ = (1−θ)T + θS`, choosing `θ` adaptively so the stabilized operator stays non-expansive when needed.
 - `θ` comes from a **closed-form quadratic root** of `η(x, T_θ)² = 1`, so there are no extra hyperparameters to tune.
 
-The result is a wrapper that is agnostic to the proximal solver (PGD / HQS / ADMM / RED-GD), the pretrained denoiser (CNN / diffusion / transformer), and the measurement model.
+The result is a wrapper that is agnostic to the proximal solver, the pretrained denoiser, and the measurement model.
 
 ---
 
@@ -34,38 +34,72 @@ xₖ₊₁ = T_θₖ(xₖ),     T_θ = (1−θ)·T + θ·S
 
 ---
 
+## What's supported
+
+**Applications (forward models)**
+
+| Task | Notes |
+|---|---|
+| **Deblurring** | Levin09 motion kernels (`kernel_id` 0–7), 25×25 Gaussian (`8`), 9×9 box (`9`) |
+| **Super-resolution** | `kernels_12` blur kernels + `scale_factor` (×2 / ×3 / ×4) downsampling |
+
+**Solvers**
+
+Proximal Gradient / Forward-Backward Splitting (`FBS`), Half-Quadratic Splitting (`HQS`), **RED-GD** (`RED`), and **Douglas–Rachford Splitting** (`DRS`). Note that `DRS` is *not* ADMM — it is the Douglas–Rachford fixed-point form used here.
+
+**Black-box denoisers**
+
+All PnP denoisers from the paper experiments are wired into `deepinv_denoiser.py` via a single `get_denoiser(name, n_channels, device)` factory:
+
+`DRUNet`, `DnCNN`, `MMO`, `GSDRUNet`, `DiffUNet`, `CoCoDRUNet`, and `SPCDRUNet` / `PCDRUNet`.
+
+`DRUNet`/`DnCNN`/`MMO`/`GSDRUNet`/`DiffUNet` load directly through DeepInverse; `CoCo` and `PC` use a `UNetRes` backbone with a concatenated noise-level map. Any denoiser can be wrapped with an equivariant variant via `EquivDen`.
+
+**Contractive anchor (`S`)**
+
+The CCD anchor ships in two variants — **color** and **grayscale** — selected by config:
+
+| Variant | Config | Weights |
+|---|---|---|
+| CCD color (3-channel) | `ccd_color_config.yml` | `pretrained/ccd_color.pth` |
+| CCD grayscale (1-channel) | `ccd_gray_config.yml` | `pretrained/ccd_gray.pth` |
+
+---
+
 ## Repository structure
 
 ```
 CoSTA/
-├── demo1.py                       # Deblurring demo (DRUNet, Levin kernel 3, σ=0.03)
-├── demo2.py                       # Deblurring demo (DRUNet, Levin kernel 2, σ=0.02)
-├── deepinv_denoiser.py            # Black-box denoiser wrappers (DRUNet + equivariant) via DeepInverse
+├── demo1.py                       # Deblurring demo (DRUNet, Levin kernel 3)
+├── demo2.py                       # Deblurring demo (DRUNet, Levin kernel 2)
+├── deepinv_denoiser.py            # get_denoiser() factory for all black-box denoisers
 ├── requirements.txt
 │
 ├── classes/
-│   ├── PnP_class.py                          # Base PnP / forward-model machinery
+│   ├── PnP_class.py                          # Forward models (deblurring, super-resolution)
+│   │                                         #   + solvers: FBS / HQS / RED / DRS
 │   ├── OursStabilizingMethod_PnP_class.py    # CoSTA stabilizer (η, θ, anchor blending)
-│   ├── OursStabilizingMethod_PnP_class_v2.py # Variant of the stabilizer
-│   ├── blur_utils.py                         # Blur forward-model utilities
-│   ├── utils_restoration.py                  # Image I/O helpers
-│   └── utils_image.py                        # Image-processing utilities
+│   ├── blur_utils.py                         # Blur / SR forward-model + prox utilities
+│   ├── utils_restoration.py
+│   └── utils_image.py
 │
-├── denoisers/                     # Contractive anchor (CCD) building blocks
+├── denoisers/                     # Denoiser architectures
 │   ├── ccd.py                     # Contractive Convex Denoiser — the neural anchor S
+│   ├── network_unet.py            # UNetRes backbone (CoCo / SPC / PC-DRUNet)
+│   ├── deal.py, wc_conv_net.py    # DEAL, WCRR
 │   ├── multi_conv.py              # Nonexpansive multi-convolution operator W
-│   ├── linear_spline.py           # Learnable monotone linear-spline activation
-│   ├── quadratic_spline.py
-│   ├── spline_module.py           # Noise-level scaling spline ν(σ)
-│   └── spline_autograd_func.py    # Custom autograd for the splines
+│   ├── linear_spline.py, quadratic_spline.py, spline_module.py, spline_autograd_func.py
+│   └── ...                        # supporting modules
 │
 ├── pretrained/
-│   ├── ccd_model.pth              # ✅ Contractive anchor weights (ships with repo)
-│   └── ccd_config.yml             # Anchor architecture / training config
+│   ├── ccd_color.pth              # ✅ contractive anchor, color (ships with repo)
+│   ├── ccd_color_config.yml
+│   ├── ccd_gray.pth               #  contractive anchor, grayscale (see Drive)
+│   └── ccd_gray_config.yml
 │
 └── images/
-    ├── leaves.png, im_078.png     # Sample test images
-    └── kernels/                   # Blur kernels (Levin09.mat, kernels_12.mat)
+    ├── leaves.png, im_078.png     # sample test images
+    └── kernels/                   # Levin09.mat (deblur), kernels_12.mat (SR)
 ```
 
 ---
@@ -80,27 +114,25 @@ D_σ(x) = (1 − γτ)·x − γ·Wᵀ ( ν(σ)⁻¹ · ψ( ν(σ)·W x ) )
 
 A few deliberate, non-standard choices make this both expressive and provably contractive:
 
-- **Gradient-step parameterization.** `D` is the gradient step of a smooth, strongly convex potential `φ(x) = Σⱼ φⱼ((Wx)ⱼ) + (τ/2)‖x‖²`. Strong convexity + smoothness of `φ` guarantee `D` is a κ-contraction for a small enough step size, so we don't need spectral-normalization tricks at inference.
-- **Nonexpansive convolution `W`.** `W` is reparameterized as `W = W̃·R^{−1/2}` with a row-sum normalization that guarantees `‖W‖₂ ≤ 1`. This lets the 3×3 / 64-channel filters train **freely** while preserving `‖W‖ ≤ 1` throughout training and downstream use.
-- **Monotone linear-spline activations.** Each nonlinearity is a learnable linear spline with slopes constrained to `[0, 1]` (101 equidistant knots). Because each `ψⱼ = φⱼ′` with `φⱼ` convex, the activation is monotone — which is exactly what keeps the potential convex. We found this more expressive than ReLU for this role.
-- **Noise-aware scaling `ν(σ)`.** A small spline-based scaling conditions the *same* anchor on a range of noise levels, so one model handles `σ ∈ [0, 25/255]` rather than training a separate anchor per noise level.
-- **Contraction budgeting via `τ`.** With the fixed step size `γ = 1/(1+2τ)`, the contraction factor is `κ = √(1+2τ+2τ²)/(1+2τ)`. `τ` is constrained to `[0.0102, 0.135]` so that `κ ∈ [0.9, 0.99]` — strong enough to anchor, weak enough to stay expressive.
+- **Gradient-step parameterization.** `D` is the gradient step of a smooth, strongly convex potential `φ(x) = Σⱼ φⱼ((Wx)ⱼ) + (τ/2)‖x‖²`. Strong convexity + smoothness guarantee `D` is a κ-contraction for a small enough step size — no spectral-normalization tricks needed at inference.
+- **Nonexpansive convolution `W`.** `W` is reparameterized as `W = W̃·R^{−1/2}` with a row-sum normalization that guarantees `‖W‖₂ ≤ 1`, so the 3×3 / 64-channel filters can train **freely** while staying non-expansive.
+- **Monotone linear-spline activations.** Each nonlinearity is a learnable linear spline with slopes constrained to `[0, 1]` (101 knots). Since each `ψⱼ = φⱼ′` with `φⱼ` convex, the activation is monotone — exactly what keeps the potential convex. More expressive than ReLU here.
+- **Noise-aware scaling `ν(σ)`.** A small spline-based scaling conditions the *same* anchor on a range of noise levels (`σ ∈ [0, 25/255]`), so one model handles all levels.
+- **Contraction budgeting via `τ`.** With `γ = 1/(1+2τ)`, the contraction factor is `κ = √(1+2τ+2τ²)/(1+2τ)`. `τ` is constrained to `[0.0102, 0.135]` so `κ ∈ [0.9, 0.99]` — strong enough to anchor, weak enough to stay expressive. These bounds are identical for the color and grayscale configs; only the channel count differs.
 
-On the stabilizer side, the **closed-form θ** (solving `η² = 1` and taking the minimal root in `[0,1]`) is the other non-obvious choice: it makes CoSTA a true drop-in with no per-run tuning, instead of an iterative search over the blend weight.
+On the stabilizer side, the **closed-form θ** (solving `η² = 1`, taking the minimal root in `[0,1]`) is the other non-obvious choice: it makes CoSTA a true drop-in with no per-run tuning, instead of an iterative search over the blend weight.
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Environment
-conda create -n costa python=3.10 -y
+conda create -n costa python=3.11 -y
 conda activate costa
 
-# 2. PyTorch (match your CUDA version — see https://pytorch.org)
+# PyTorch — match your CUDA version (see https://pytorch.org)
 pip install torch torchvision
 
-# 3. Remaining dependencies
 pip install -r requirements.txt
 ```
 
@@ -110,19 +142,22 @@ A CUDA-capable GPU is recommended; the demos default to `cuda:0` (switch to `cpu
 
 ## Pretrained models
 
-The **contractive anchor** weights (`pretrained/ccd_model.pth`) are included in this repository.
+The **contractive anchor** weights are small and the color variant ships with the repo. All **black-box denoiser** weights from the experiments (DRUNet, DnCNN, DiffUNet, GSDRUNet, CoCoDRUNet, MMO, SPC/PC-DRUNet, DEAL, …) and the **grayscale anchor** are hosted on Google Drive:
 
-The **black-box denoiser** weights used in the experiments (DRUNet and others) are hosted on Google Drive:
+➡️ **[Pretrained models (Google Drive)](https://drive.google.com/drive/folders/1D7gRmjC36a9ZDvfDrWjJxxTP6JA1ddn7?usp=sharing)**
 
-➡️ **[Pretrained denoisers (Google Drive)](https://drive.google.com/drive/folders/1D7gRmjC36a9ZDvfDrWjJxxTP6JA1ddn7?usp=sharing)**
-
-After downloading, place the weights under `pretrained/` so the paths in `deepinv_denoiser.py` resolve, e.g.:
+Download and place everything under `pretrained/`, matching the paths in `deepinv_denoiser.py`, e.g.:
 
 ```
 pretrained/
-├── ccd_model.pth          # included
-├── ccd_config.yml         # included
-└── drunet_color.pth       # download from the Drive link above
+├── ccd_color.pth / ccd_color_config.yml      # color anchor (color config ships with repo)
+├── ccd_gray.pth  / ccd_gray_config.yml       # grayscale anchor
+├── drunet_color.pth / drunet_gray.pth
+├── dncnn_sigma2_color.pth / ...
+├── GSDRUNet_color_torch.ckpt / ...
+├── coco_color.pth / SPC_DRUNet_color.pth / ...
+├── deal_color.pth / ...
+└── ...
 ```
 
 ---
@@ -130,28 +165,25 @@ pretrained/
 ## Running the demos
 
 ```bash
-python demo1.py    # deblurring: leaves.png, Levin kernel 3, σ = 0.03
-python demo2.py    # deblurring: im_078.png, Levin kernel 2, σ = 0.02
+python demo1.py    # deblurring: leaves.png, Levin kernel 3
+python demo2.py    # deblurring: im_078.png, Levin kernel 2
 ```
 
-Each demo runs three variants of PnP-HQS side by side — **Vanilla PnP**, **Equivariant PnP**, and **Ours (CoSTA-stabilized)** — for 1001 iterations, with live-updating terminal plots of:
+Each demo runs three variants of a PnP solver side by side — **Vanilla PnP**, **Equivariant PnP**, and **Ours (CoSTA-stabilized)** — with live terminal plots of **PSNR**, the **stability-index `η`** (black-box vs. stabilized), and the adaptive blend weight **`θ`**. Outputs are written to `demo_logs/`.
 
-- **PSNR** over iterations (Ours vs. Vanilla vs. Equivariant),
-- the **stability-index `η`** (black-box vs. stabilized), and
-- the adaptive blend weight **`θ`**.
+To change task/solver/denoiser, edit the call in the demo script:
 
-Results (ground truth, observation, initialization, and final reconstruction) are written to `demo_logs/`.
-
-To try your own settings, edit the call in the demo script — `forward_model_args` (kernel, scale), `noise_level`, `num_iterations`, the stabilizer's `step_size`/`algo`, and `algo_params` (solver `name`, `step_size`, etc.).
+- **Switch to super-resolution** — set `forward_model_name='superresolution'` and pass `forward_model_args={'scale_factor': 2, 'kernel_id': 3, 'device': device}`.
+- **Switch the black-box denoiser** — change `get_denoiser('DRUNet', ...)` to `'DnCNN'`, `'MMO'`, `'GSDRUNet'`, `'DiffUNet'`, `'CoCoDRUNet'`, or `'SPCDRUNet'`.
+- **Switch the solver** — set `algo_params['name']` to `'FBS'`, `'HQS'`, `'RED'`, or `'DRS'`.
+- **Switch the anchor** — point `stabilizer_args` to the color or grayscale CCD config/weights.
 
 ---
 
 ## Roadmap
 
-This release focuses on the deblurring demo with PnP-HQS. We will be extending the code soon to cover:
-
-- **Super-resolution** (the bicubic-initialized SR pipeline from the paper),
-- **Additional PnP and RED algorithms** (PGD, ADMM, RED-GD, …) and more black-box denoiser backbones,
+- **Super-resolution** demos and configs (forward model already supported in `PnP_class.py`).
+- Broader solver / denoiser sweeps reproducing the paper tables.
 - Updated **paper and arXiv links** once available.
 
 ---

@@ -23,8 +23,9 @@ class img_PnP:
             cs = crop_size if isinstance(crop_size, (list, tuple)) else [crop_size, crop_size]
             self.image = crop_center(self.image, cs[0], cs[1])
 
-        if forward_model_name != "deblurring":
-            raise ValueError(f"Only 'deblurring' is supported, got: {forward_model_name}")
+        valid_forward_models = ("deblurring", "superresolution")
+        if forward_model_name not in valid_forward_models:
+            raise ValueError(f"Only {valid_forward_models} are supported, got: {forward_model_name}")
 
         self.forward_model = forward_model_name
         self.forward_model_args = forward_model_args
@@ -61,20 +62,30 @@ class img_PnP:
         return y_
 
     def set_forward_model(self):
-        kernels = hdf5storage.loadmat('images/kernels/Levin09.mat')['kernels']
-        self.kernel_id = self.forward_model_args['kernel_id']
-        if self.kernel_id < 8:
+        if self.forward_model == "superresolution":
+            # Super-resolution uses the kernels_12 blur set (kernel_id 0-7);
+            # the scale_factor controls the downsampling rate.
+            kernels = hdf5storage.loadmat('images/kernels/kernels_12.mat')['kernels']
+            self.kernel_id = self.forward_model_args['kernel_id']
+            if not (0 <= self.kernel_id < 8):
+                raise ValueError("kernel_id must be in [0, 8) for superresolution")
             self.kernel = kernels[0, self.kernel_id]
-        elif self.kernel_id == 8:
-            m, n = 12., 12.
-            y, x = np.ogrid[-m:m+1, -n:n+1]
-            h = np.exp(-(x*x + y*y) / (2.*1.6*1.6))
-            h[h < np.finfo(h.dtype).eps * h.max()] = 0
-            self.kernel = h / h.sum()
-        elif self.kernel_id == 9:
-            self.kernel = (1/81) * np.ones((9, 9))
         else:
-            raise ValueError("kernel_id must be < 10")
+            # Deblurring: Levin09 motion kernels (0-7), 25x25 Gaussian (8), 9x9 box (9).
+            kernels = hdf5storage.loadmat('images/kernels/Levin09.mat')['kernels']
+            self.kernel_id = self.forward_model_args['kernel_id']
+            if self.kernel_id < 8:
+                self.kernel = kernels[0, self.kernel_id]
+            elif self.kernel_id == 8:
+                m, n = 12., 12.
+                y, x = np.ogrid[-m:m+1, -n:n+1]
+                h = np.exp(-(x*x + y*y) / (2.*1.6*1.6))
+                h[h < np.finfo(h.dtype).eps * h.max()] = 0
+                self.kernel = h / h.sum()
+            elif self.kernel_id == 9:
+                self.kernel = (1/81) * np.ones((9, 9))
+            else:
+                raise ValueError("kernel_id must be < 10")
 
         self.sf = self.forward_model_args['scale_factor']
         self.device = self.forward_model_args['device']
@@ -92,7 +103,15 @@ class img_PnP:
         self.observed = self.A_function(img, **self.A_kwargs).cpu().squeeze(0).permute(1, 2, 0).detach().numpy()
 
     def set_start_image(self):
-        self.start_image = self.observed.copy()
+        if self.forward_model == "superresolution" and self.sf > 1:
+            # Initialize SR from a bicubic upsampling of the low-res observation.
+            h, w = self.image.shape[0], self.image.shape[1]
+            start = cv2.resize(self.observed, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+            if start.ndim == 2:
+                start = start[:, :, None]
+            self.start_image = start
+        else:
+            self.start_image = self.observed.copy()
         self.initialize_prox_kernel(self.observed_tensor)
 
     def get_metrics(self, my_image):
@@ -157,3 +176,37 @@ class img_PnP:
         if clip:
             x = np.clip(x, 0, 1)
         return (x.copy(), 0, 0)
+
+    def RED(self, y, step_size, denoiser, denoiser_args, denoiser_object):
+        y = y[0]
+        transpose = self.algo_params['transpose']
+        clip = self.algo_params['clip']
+        lam = self.algo_params.get('lambda', 1.0)
+
+        Dy = denoiser(y.transpose(2, 0, 1), denoiser_object, **denoiser_args).transpose(1, 2, 0) \
+            if transpose else denoiser(y, denoiser_object, **denoiser_args)
+        x = self.grad_desc_step(y, step_size) - step_size * lam * (y - Dy)
+        if clip:
+            x = np.clip(x, 0, 1)
+        return (x.copy(), 0, 0)
+
+    def DRS(self, y, step_size, denoiser, denoiser_args, denoiser_object):
+        transpose = self.algo_params['transpose']
+        clip = self.algo_params['clip']
+
+        u, v, b = y
+
+        v = self.data_fidelity_prox_step(u, step_size)
+
+        # applying denoiser
+        b = denoiser((2*v - u).transpose(2, 0, 1),
+                     denoiser_object, **denoiser_args).transpose(1, 2, 0) if transpose else denoiser(2*v - u, denoiser_object, **denoiser_args)
+
+        u = u + (b - v)
+
+        if clip:
+            v = np.clip(v, 0, 1)
+            u = np.clip(u, 0, 1)
+            b = np.clip(b, 0, 1)
+
+        return (u.copy(), v.copy(), b.copy())

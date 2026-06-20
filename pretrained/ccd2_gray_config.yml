@@ -1,0 +1,58 @@
+model:
+  type: CCD2
+  step_size_type: t0
+  scaling: true
+  blind: true
+  param_multi_conv:
+      num_channels:
+      - 1
+      - 4
+      - 8
+      - 60
+      size_kernels:
+      - 3
+      - 3
+      - 3
+  param_spline_activation:
+      mode: conv
+      size: 101
+      range_: 1.0
+      init: zero
+      slope_min: 0.0
+      slope_max: 1.0
+  param_spline_scaling:
+      num_knots: 11
+      x_min: 0.0
+      x_max: 25.0
+      init: 5.0
+      slope_min: null
+      slope_max: null
+      clamp: true
+training:
+  color_mode: gray
+  sigma_min: 0.0
+  sigma_max: 25.0
+  patch_size: 128
+  batch_size: 16
+  epochs: 100000
+  loss: mse
+  seed: 42
+  tau_lb: 0.01004
+  tau_ub: 0.10394
+  optimizer: Adam
+  lr_diff: true
+  lr: 0.05
+  # lr_conv: null
+  # lr_spline_act: null
+  # lr_spline_scal: null
+  sch: cosine
+  milestones_divider: 5
+  lr_gamma: 0.5
+  val_crop_size: 256
+  val_freq: 10000
+  save_freq: 10000
+  out_folder: pretrained/ccd_v2/mse/gray/k3_l4_t0_scaling_cosine_blind
+  in_folder: data
+  train_ds_ver: '2'
+  gpu_id: 0
+  no_normalize_sigma: false

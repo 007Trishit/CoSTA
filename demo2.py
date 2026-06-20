@@ -30,7 +30,7 @@ my_image.OursStabilizingMethod_PnP(
     stabilizer_args={
         'relax': 0, 'algo': 'HQS', 'step_size': 5,
         'noise_factor': 1, 'ne': False, 'rw': False,
-        'path': 'pretrained/ccd_model.pth', 'name': 'ccd'},
+        'path': 'pretrained/ccd_color.pth', 'name': 'ccd'},
     stabilizer_id='ccd',
     equivariant=True,
     equiv_object=EquivDen,
