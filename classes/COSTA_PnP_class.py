@@ -11,7 +11,7 @@ def build_ccd_model(model_args):
     return CCD(**model_args)
 
 
-class img_OursStabilizingMethod_PnP(img_PnP):
+class img_COSTA_PnP(img_PnP):
 
     def run_ccd(self, y, denoiser, sigma=0.01):
         y_ = torch.from_numpy(y.astype(np.float32)).unsqueeze(0).to(self.device)
@@ -29,7 +29,7 @@ class img_OursStabilizingMethod_PnP(img_PnP):
             self.stabilizer_name = stabilizer_args.get('name', 'CCD')
             path = stabilizer_args['path']
             print(f"Loading {self.stabilizer_name} model from: {path}")
-            with open(os.path.join(os.path.dirname(path), self.stabilizer_name.lower() + '_config.yml'), 'r') as f:
+            with open(os.path.join(os.path.dirname(path), self.stabilizer_name.lower() + f'_{"color" if self.color_mode == "RGB" else "gray"}' + '_config.yml'), 'r') as f:
                 config = yaml.safe_load(f)
             self.ccd = build_ccd_model(config['model']).to(self.device)
             if not stabilizer_args.get('rw', False):
@@ -78,7 +78,7 @@ class img_OursStabilizingMethod_PnP(img_PnP):
             return 0.0
         return min(roots)
 
-    def OursStabilizingMethod_PnP(self, denoiser, denoiser_args, denoiser_object=None,
+    def COSTA_PnP(self, denoiser, denoiser_args, denoiser_object=None,
                                   num_iterations=10, plot_graphs=True, plot_interval=100,
                                   equivariant=False, random=True, equiv_object=None,
                                   dynamic_anchor=False, dynamic_cf=True,
