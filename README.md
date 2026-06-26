@@ -1,7 +1,7 @@
 # COSTA
 
 **Stabilizing Deep Reconstruction Operators with Contractive Anchoring** — ECCV 2026
-Arghya Sinha, Trishit Mukherjee, Kunal N. Chaudhary · Indian Institute of Science, Bangalore
+Arghya Sinha, Trishit Mukherjee, Kunal N. Chaudhury · Indian Institute of Science, Bangalore
 
 📦 **Repo:** https://github.com/trishitmg/costa &nbsp;·&nbsp; 📄 Paper & arXiv links coming soon.
 **Status:** deblurring and super-resolution demos are live; more solvers, denoisers, and reproduction scripts are being added.
@@ -87,7 +87,7 @@ $$
 
 PnP/RED replace the proximal/gradient step of the regularizer $g$ with a pretrained denoiser, which turns each solver (PnP-PGD/FBS, PnP-HQS, RED-GD, DRS) into a single fixed-point map $T$. The instability we target is that iterating $x_{k+1} = T(x_k)$ is not guaranteed to be non-expansive, so it can diverge after an early peak.
 
-**Stability-index.** For a reference point $p$, the local expansion of $T$ at $x$ is measured by
+**Stability-index.** For a reference point $p$, we track the stability-index $\eta_p(x, T)$ — the size of a single step of $T$ relative to the current distance from $p$:
 
 $$
 \eta_p(x, T) =
@@ -97,15 +97,16 @@ $$
 \end{cases}
 $$
 
-A value $\eta_p > 1$ means $T$ pushes $x$ away from $p$ (locally expansive) and signals a risk of collapse.
+A large stability-index, $\eta_p > 1$, marks the iterate as locally unstable with respect to $p$ and signals a risk of collapse; $\eta_p \leqslant 1$ is the stable regime we want to maintain.
 
 **Contractive anchoring.** Take a $\kappa$-contraction $S$ (with $\kappa < 1$) whose unique fixed point is $p$, and average it with the black box,
 
 $$
-T_\theta := (1-\theta)T + \theta S, \qquad \theta \in [0,1].
+T_\theta := (1-\theta)\,T + \theta\,S, \qquad \theta \in [0,1].
 $$
 
-Larger $\theta$ is more stable but pulls the result toward the anchor's (lower-quality) fixed point, so COSTA uses the **smallest** $\theta$ that restores non-expansiveness. Writing $T_\theta(x) - p = (1-\theta)(T(x)-p) + \theta(S(x)-p)$, the target condition $\eta_p(x, T_\theta)^2 = 1$ is a scalar quadratic in $\theta$, solved in closed form — no tuning.
+A larger $\theta$ lowers the stability-index but pulls the result toward the anchor's (lower-quality) fixed point, so we use the **smallest** $\theta$ that brings the stability-index back to the stable threshold $\eta_p(x, T_\theta) = 1$. Writing $T_\theta(x) - p = (1-\theta)\,(T(x)-p) + \theta\,(S(x)-p)$, this condition is a scalar quadratic in $\theta$ with a closed-form minimal root in $[0,1]$ — no tuning.
+
 
 **Algorithm 1 — COSTA**
 
@@ -119,7 +120,7 @@ Larger $\theta$ is more stable but pulls the result toward the anchor's (lower-q
 >
 > **end for**
 
-When $T$ is well-behaved ($\eta_k \le 1$) the update is exactly the original operator. Enforcing the target level $1$ keeps the iterates bounded, and in practice $\theta_k$ stays small, so reconstruction quality near the peak is preserved.
+When $T$ is well-behaved ($\eta_k \leqslant 1$) the update is exactly the original operator. Enforcing the target level $1$ keeps the iterates bounded, and in practice $\theta_k$ stays small, so reconstruction quality near the peak is preserved.
 
 ---
 
@@ -172,7 +173,7 @@ COSTA/
 ```bibtex
 @inproceedings{sinha2026costa,
   title     = {Stabilizing Deep Reconstruction Operators with Contractive Anchoring},
-  author    = {Sinha, Arghya and Mukherjee, Trishit and Chaudhary, Kunal N.},
+  author    = {Sinha, Arghya and Mukherjee, Trishit and Chaudhury, Kunal N.},
   booktitle = {Proceedings of the European Conference on Computer Vision (ECCV)},
   year      = {2026}
 }
@@ -182,4 +183,4 @@ COSTA/
 
 ## Acknowledgements
 
-All pretrained denoisers are obtained through [DeepInverse](https://deepinv.github.io/deepinv). This work was supported by the Government of India through the PMRF and ANRF, Qualcomm Technologies, Inc. through the Qualcomm Innovation Fellowship India, and the Kotak IISc AI-ML Centre through GPU resources.
+This work was supported by the Government of India through the PMRF and ANRF, Qualcomm Technologies, Inc. through the Qualcomm Innovation Fellowship India, and the Kotak IISc AI-ML Centre through GPU resources.
